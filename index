@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Permainan Football</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            color: white;
+        }
+
+        .game-container {
+            text-align: center;
+        }
+
+        h1 {
+            color: #FFD700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            margin-bottom: 10px;
+        }
+
+        canvas {
+            border: 3px solid #FFD700;
+            border-radius: 10px;
+            background: linear-gradient(to bottom, #4CAF50 0%, #2E7D32 100%);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            cursor: none;
+        }
+
+        .ui {
+            margin: 20px 0;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .score {
+            display: flex;
+            gap: 50px;
+            font-size: 28px;
+            margin: 10px 0;
+        }
+
+        .controls {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+
+        .restart-btn {
+            background: #FF5722;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+        }
+
+        .restart-btn:hover {
+            background: #E64A19;
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>⚽ FOOTBALL GAME ⚽</h1>
+        <div class="ui">
+            <div class="score">
+                <span>Skor: <span id="score">0</span></span>
+                <span>Waktu: <span id="time">60</span>s</span>
+            </div>
+            <div>Gunakan MOUSE untuk menggerakkan pemain!</div>
+        </div>
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        <div class="controls">
+            <button class="restart-btn" onclick="restartGame()">🔄 Main Lagi</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const timeElement = document.getElementById('time');
+
+        // Game variables
+        let gameState = {
+            score: 0,
+            time: 60,
+            gameRunning: true,
+            player: { x: 100, y: 250, width: 30, height: 30, speed: 8 },
+            ball: { x: 400, y: 250, vx: 3, vy: 0, radius: 12 },
+            goal: { x: 750, y: 180, width: 20, height: 140 },
+            enemies: []
+        };
+
+        let lastTime = 0;
+        let gameTimer;
+
+        // Initialize enemies
+        function initEnemies() {
+            gameState.enemies = [];
+            for (let i = 0; i < 3; i++) {
+                gameState.enemies.push({
+                    x: 500 + Math.random() * 200,
+                    y: 100 + Math.random() * 300,
+                    width: 25,
+                    height: 25,
+                    vx: -2 - Math.random() * 2,
+                    vy: (Math.random() - 0.5) * 4
+                });
+            }
+        }
+
+        // Draw functions
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(gameState.player.x + gameState.player.width/2, gameState.player.y + gameState.player.height/2);
+            
+            // Player body
+            ctx.fillStyle = '#2196F3';
+            ctx.fillRect(-gameState.player.width/2, -gameState.player.height/2, gameState.player.width, gameState.player.height);
+            
+            // Player head
+            ctx.fillStyle = '#FFEB3B';
+            ctx.beginPath();
+            ctx.arc(0, -gameState.player.height/2 - 5, 8, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Jersey number
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('10', 0, 3);
+            
+            ctx.restore();
+        }
+
+        function drawBall() {
+            ctx.save();
+            ctx.translate(gameState.ball.x, gameState.ball.y);
+            
+            // Ball shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath();
+            ctx.arc(3, 3, gameState.ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Ball
+            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, gameState.ball.radius);
+            gradient.addColorStop(0, 'white');
+            gradient.addColorStop(0.7, '#FF9800');
+            gradient.addColorStop(1, '#F57C00');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(0, 0, gameState.ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Ball pattern
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, gameState.ball.radius * 0.8, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function drawGoal() {
+            ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            ctx.fillRect(gameState.goal.x - 10, gameState.goal.y - 20, gameState.goal.width + 20, gameState.goal.height + 40);
+            
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(gameState.goal.x, gameState.goal.y, gameState.goal.width, gameState.goal.height);
+        }
+
+        function drawEnemies() {
+            gameState.enemies.forEach(enemy => {
+                ctx.save();
+                ctx.translate(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+                
+                // Enemy body (red team)
+                ctx.fillStyle = '#F44336';
+                ctx.fillRect(-enemy.width/2, -enemy.height/2, enemy.width, enemy.height);
+                
+                // Enemy head
+                ctx.fillStyle = '#FF5722';
+                ctx.beginPath();
+                ctx.arc(0, -enemy.height/2 - 5, 7, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            });
+        }
+
+        function drawField() {
+            // Field lines
+            ctx.strokeStyle = '#90CAF9';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            
+            // Center line
+            ctx.beginPath();
+            ctx.moveTo(canvas.width/2, 0);
+            ctx.lineTo(canvas.width/2, canvas.height);
+            ctx.stroke();
+            
+            // Center circle
+            ctx.beginPath();
+            ctx.arc(canvas.width/2, canvas.height/2, 50, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Goal area
+            ctx.strokeRect(gameState.goal.x - 50, gameState.goal.y - 20, 70, gameState.goal.height + 40);
+        }
+
+        // Update game logic
+        function update(deltaTime) {
+            if (!gameState.gameRunning) return;
+
+            // Update player (mouse controlled)
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = (gameState.player.x - rect.left) * (canvas.width / rect.width);
+            const mouseY = (gameState.player.y - rect.top) * (canvas.height / rect.height);
+
+            // Smooth player movement towards mouse
+            const dx = mouseX - gameState.player.x;
+            const dy = mouseY - gameState.player.y;
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            if (distance > 5) {
+                gameState.player.x += (dx / distance) * gameState.player.speed;
+                gameState.player.y += (dy / distance) * gameState.player.speed;
+            }
+
+            // Keep player in bounds
+            gameState.player.x = Math.max(0, Math.min(canvas.width - gameState.player.width, gameState.player.x));
+            gameState.player.y = Math.max(0, Math.min(canvas.height - gameState.player.height, gameState.player.y));
+
+            // Update ball physics
+            gameState.ball.x += gameState.ball.vx;
+            gameState.ball.y += gameState.ball.vy;
+            gameState.ball.vy += 0.2; // gravity
+
+            // Ball collision with walls
+            if (gameState.ball.y <= gameState.ball.radius || gameState.ball.y >= canvas.height - gameState.ball.radius) {
+                gameState.ball.vy *= -0.8;
+                gameState.ball.y = Math.max(gameState.ball.radius, Math.min(canvas.height - gameState.ball.radius, gameState.ball.y));
+            }
+
+            if (gameState.ball.x <= gameState.ball.radius) {
+                gameState.ball.vx *= -0.8;
+                gameState.ball.x = gameState.ball.radius;
+            }
+
+            // Ball collision with player (kick)
+            const playerDist = Math.sqrt(
+                Math.pow(gameState.player.x + gameState.player.width/2 - gameState.ball.x, 2) +
+                Math.pow(gameState.player.y + gameState.player.height/2 - gameState.ball.y, 2)
+            );
+            
+            if (playerDist < gameState.ball.radius + 20) {
+                const angle = Math.atan2(
+                    gameState.ball.y - (gameState.player.y + gameState.player.height/2),
+                    gameState.ball.x - (gameState.player.x + gameState.player.width/2)
+                );
+                gameState.ball.vx = Math.cos(angle) * 8 + (Math.random() - 0.5) * 4;
+                gameState.ball.vy = Math.sin(angle) * 8 + (Math.random() - 0.5) * 4;
+            }
+
+            // Goal detection
+            if (gameState.ball.x + gameState.ball.radius > gameState.goal.x &&
+                gameState.ball.y > gameState.goal.y &&
+                gameState.ball.y < gameState.goal.y + gameState.goal.height) {
+                gameState.score++;
+                resetBall();
+                scoreElement.textContent = gameState.score;
+            }
+
+            // Update enemies
+            gameState.enemies.forEach(enemy => {
+                enemy.x += enemy.vx;
+                enemy.y += enemy.vy;
+
+                // Enemy bounce off walls
+                if (enemy.x <= 0 || enemy.x >= canvas.width - enemy.width) enemy.vx *= -1;
+                if (enemy.y <= 0 || enemy.y >= canvas.height - enemy.height) enemy.vy *= -1;
+
+                // Enemy chase ball
+                const dx = gameState.ball.x - enemy.x;
+                const dy = gameState.ball.y - enemy.y;
+                enemy.vx += (dx * 0.0005);
+                enemy.vy += (dy * 0.0005);
+            });
+
+            // Ball collision with enemies
+            gameState.enemies.forEach(enemy => {
+                const dx = gameState.ball.x - (enemy.x + enemy.width/2);
+                const dy = gameState.ball.y - (enemy.y + enemy.height/2);
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist < gameState.ball.radius + 15) {
+                    gameState.ball.vx *= -0.7;
+                    gameState.ball.vy *= -0.7;
+                }
+            });
+        }
+
+        function resetBall() {
+            gameState.ball.x = 400;
+            gameState.ball.y = 250;
+            gameState.ball.vx = 3;
+            gameState.ball.vy = 0;
+        }
+
+        function render() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawField();
+            drawGoal();
+            drawPlayer();
+            drawBall();
+            drawEnemies();
+        }
+
+        function gameLoop(currentTime) {
+            const deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+
+            update(deltaTime);
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startTimer() {
+            gameTimer = setInterval(() => {
+                if (gameState.gameRunning) {
+                    gameState.time--;
+                    timeElement.textContent = gameState.time;
+                    
+                    if (gameState.time <= 0) {
+                        endGame();
+                    }
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            gameState.gameRunning = false;
+            alert(`Game Over!\nSkor Akhir: ${gameState.score}\nCoba lagi untuk skor lebih tinggi!`);
+        }
+
+        function restartGame() {
+            gameState = {
+                score: 0,
+                time: 60,
+                gameRunning: true,
+                player: { x: 100, y: 250, width: 30, height: 30, speed: 8 },
+                ball: { x: 400, y: 250, vx: 3, vy: 0, radius: 12 },
+                goal: { x: 750, y: 180, width: 20, height: 140 },
+                enemies: []
+            };
+            
+            scoreElement.textContent = '0';
+            timeElement.textContent = '60';
+            clearInterval(gameTimer);
+            initEnemies();
+            startTimer();
+        }
+
+        // Mouse control
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            gameState.player.x = e.clientX - rect.left - gameState.player.width/2;
+            gameState.player.y = e.clientY - rect.top - gameState.player.height/2;
+        });
+
+        // Initialize and start game
+        initEnemies();
+        startTimer();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
