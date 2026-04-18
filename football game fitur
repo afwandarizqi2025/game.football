@@ -1,0 +1,495 @@
+#include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
+#include <vector>
+#include <cmath>
+#include <iostream>
+#include <sstream>
+#include <fstream>
+#include <cstdlib>
+#include <ctime>
+
+class FootballGame {
+private:
+    // Window & View
+    sf::RenderWindow window;
+    sf::View gameView, uiView;
+    
+    // Game State
+    bool gameRunning, gamePaused;
+    float gameTime;
+    int scorePlayer1, scorePlayer2;
+    int level;
+    
+    // Field dimensions
+    const float FIELD_WIDTH = 1200;
+    const float FIELD_HEIGHT = 700;
+    
+    // Player 1 (Biru - Keyboard WASD)
+    sf::CircleShape player1;
+    sf::Vector2f player1Vel;
+    float player1Speed;
+    
+    // Player 2 (Merah - Keyboard Arrows)
+    sf::CircleShape player2;
+    sf::Vector2f player2Vel;
+    float player2Speed;
+    
+    // Ball
+    sf::CircleShape ball;
+    sf::Vector2f ballVel;
+    float ballSpeed;
+    bool ballInGoal;
+    
+    // Goals
+    sf::RectangleShape goal1, goal2;
+    
+    // Enemies (AI Players)
+    struct Enemy {
+        sf::CircleShape shape;
+        sf::Vector2f velocity;
+        float speed;
+        int target; // 0 = chase ball, 1 = defend goal
+    };
+    std::vector<Enemy> enemies;
+    
+    // UI Elements
+    sf::Font font;
+    sf::Text scoreText, timeText, levelText, pauseText, instructions;
+    
+    // Particles
+    struct Particle {
+        sf::CircleShape shape;
+        sf::Vector2f velocity;
+        float lifetime;
+        sf::Color color;
+    };
+    std::vector<Particle> particles;
+    
+    // Audio
+    sf::Music backgroundMusic;
+    sf::SoundBuffer kickBuffer, goalBuffer, whistleBuffer;
+    sf::Sound kickSound, goalSound, whistleSound;
+    
+    // Power-ups
+    struct PowerUp {
+        sf::CircleShape shape;
+        sf::Vector2f position;
+        int type; // 0=speed, 1=big player, 2=sticky ball
+        bool active;
+        float timer;
+    };
+    std::vector<PowerUp> powerUps;
+    
+public:
+    FootballGame() : window(sf::VideoMode(1400, 800), "🏆 FOOTBALL CHAMPION 2024 🏆", sf::Style::Titlebar | sf::Style::Close) {
+        srand(time(0));
+        initGame();
+    }
+    
+    void initGame() {
+        gameRunning = true;
+        gamePaused = false;
+        gameTime = 180.0f; // 3 minutes
+        scorePlayer1 = 0;
+        scorePlayer2 = 0;
+        level = 1;
+        ballInGoal = false;
+        
+        // Setup views
+        gameView.setSize(FIELD_WIDTH, FIELD_HEIGHT);
+        gameView.setCenter(FIELD_WIDTH/2, FIELD_HEIGHT/2);
+        uiView.setSize(400, 800);
+        uiView.setCenter(200, 400);
+        
+        // Player 1 (Blue)
+        player1.setRadius(25);
+        player1.setFillColor(sf::Color::Cyan);
+        player1.setOutlineColor(sf::Color::Blue);
+        player1.setOutlineThickness(3);
+        player1.setPosition(100, FIELD_HEIGHT/2 - 25);
+        player1Speed = 400.0f;
+        player1Vel = {0, 0};
+        
+        // Player 2 (Red)
+        player2.setRadius(25);
+        player2.setFillColor(sf::Color::Red);
+        player2.setOutlineColor(sf::Color(255, 100, 100));
+        player2.setOutlineThickness(3);
+        player2.setPosition(FIELD_WIDTH - 150, FIELD_HEIGHT/2 - 25);
+        player2Speed = 400.0f;
+        player2Vel = {0, 0};
+        
+        // Ball
+        ball.setRadius(15);
+        ball.setFillColor(sf::Color(255, 255, 255));
+        ball.setOutlineColor(sf::Color(255, 165, 0));
+        ball.setOutlineThickness(2);
+        resetBall();
+        ballSpeed = 300.0f;
+        
+        // Goals
+        setupGoals();
+        
+        // Enemies
+        initEnemies();
+        
+        // Load font & UI
+        if (!font.loadFromFile("arial.ttf")) { // Download arial.ttf or use system font
+            std::cout << "Font not found!\n";
+        }
+        setupUI();
+        
+        // Audio
+        setupAudio();
+        
+        // Power-ups
+        spawnPowerUp();
+    }
+    
+    void setupGoals() {
+        // Goal 1 (Right side - Player 1 scores here)
+        goal1.setSize({30, 150});
+        goal1.setFillColor(sf::Color::Transparent);
+        goal1.setOutlineColor(sf::Color::White);
+        goal1.setOutlineThickness(5);
+        goal1.setPosition(FIELD_WIDTH - 30, FIELD_HEIGHT/2 - 75);
+        
+        // Goal 2 (Left side - Player 2 scores here)
+        goal2.setSize({30, 150});
+        goal2.setFillColor(sf::Color::Transparent);
+        goal2.setOutlineColor(sf::Color::White);
+        goal2.setOutlineThickness(5);
+        goal2.setPosition(0, FIELD_HEIGHT/2 - 75);
+    }
+    
+    void initEnemies() {
+        enemies.clear();
+        int enemyCount = 2 + level;
+        for (int i = 0; i < enemyCount; i++) {
+            Enemy enemy;
+            enemy.shape.setRadius(20);
+            enemy.shape.setFillColor(sf::Color(100, 100, 255));
+            enemy.shape.setOutlineColor(sf::Color::Blue);
+            enemy.shape.setOutlineThickness(2);
+            enemy.shape.setPosition(300 + i * 150 + rand() % 100, 100 + rand() % 400);
+            enemy.speed = 250.0f + level * 50;
+            enemy.velocity = {0, 0};
+            enemy.target = 0;
+            enemies.push_back(enemy);
+        }
+    }
+    
+    void setupUI() {
+        scoreText.setFont(font);
+        scoreText.setCharacterSize(48);
+        scoreText.setFillColor(sf::Color::Yellow);
+        scoreText.setOutlineColor(sf::Color::Black);
+        scoreText.setOutlineThickness(2);
+        
+        timeText.setFont(font);
+        timeText.setCharacterSize(36);
+        timeText.setFillColor(sf::Color::White);
+        timeText.setOutlineColor(sf::Color::Black);
+        timeText.setOutlineThickness(2);
+        timeText.setPosition(50, 50);
+        
+        levelText.setFont(font);
+        levelText.setCharacterSize(32);
+        levelText.setFillColor(sf::Color::Cyan);
+        levelText.setOutlineColor(sf::Color::Black);
+        levelText.setOutlineThickness(2);
+        levelText.setPosition(50, 100);
+        
+        pauseText.setFont(font);
+        pauseText.setCharacterSize(72);
+        pauseText.setFillColor(sf::Color::Red);
+        pauseText.setString("PAUSED\nPress P to Resume");
+        pauseText.setOrigin(pauseText.getLocalBounds().width/2, pauseText.getLocalBounds().height/2);
+        
+        instructions.setFont(font);
+        instructions.setCharacterSize(24);
+        instructions.setFillColor(sf::Color(255,255,255,128));
+        instructions.setString("Player1(WASD)  Player2(Arrows)  P=Pause  R=Restart  ESC=Quit");
+    }
+    
+    void setupAudio() {
+        // Uncomment if you have sound files
+        // backgroundMusic.openFromFile("stadium.mp3");
+        // backgroundMusic.play();
+    }
+    
+    void resetBall() {
+        ball.setPosition(FIELD_WIDTH/2, FIELD_HEIGHT/2);
+        ballVel = {ballSpeed * ((rand() % 3) - 1), (rand() % 200) - 100};
+        ballInGoal = false;
+    }
+    
+    void spawnPowerUp() {
+        PowerUp pu;
+        pu.shape.setRadius(20);
+        pu.position = {200 + rand() % 800, 100 + rand() % 500};
+        pu.type = rand() % 3;
+        pu.active = true;
+        pu.timer = 15.0f;
+        
+        switch(pu.type) {
+            case 0: pu.shape.setFillColor(sf::Color::Green); break;  // Speed
+            case 1: pu.shape.setFillColor(sf::Color::Magenta); break; // Big
+            case 2: pu.shape.setFillColor(sf::Color::Yellow); break;  // Sticky
+        }
+        powerUps.push_back(pu);
+    }
+    
+    void handleInput(float dt) {
+        player1Vel = {0, 0};
+        player2Vel = {0, 0};
+        
+        // Player 1 Controls (WASD)
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::W)) player1Vel.y -= player1Speed;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::S)) player1Vel.y += player1Speed;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) player1Vel.x -= player1Speed;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) player1Vel.x += player1Speed;
+        
+        // Player 2 Controls (Arrow Keys)
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up)) player2Vel.y -= player2Speed;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down)) player2Vel.y += player2Speed;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left)) player2Vel.x -= player2Speed;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right)) player2Vel.x += player2Speed;
+        
+        // Game controls
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::P)) {
+            gamePaused = !gamePaused;
+        }
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::R)) {
+            restartLevel();
+        }
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Escape)) {
+            window.close();
+        }
+    }
+    
+    void updatePlayers(float dt) {
+        // Update Player 1
+        player1.move(player1Vel * dt);
+        keepInBounds(player1);
+        
+        // Update Player 2
+        player2.move(player2Vel * dt);
+        keepInBounds(player2);
+    }
+    
+    void updateBall(float dt) {
+        if (!ballInGoal) {
+            ball.move(ballVel * dt);
+            
+            // Ball friction & bounce
+            ballVel.x *= 0.99f;
+            ballVel.y *= 0.99f;
+            
+            // Wall collision
+            if (ball.getPosition().y <= 15 || ball.getPosition().y >= FIELD_HEIGHT - 15) {
+                ballVel.y *= -0.8f;
+                // kickSound.play();
+            }
+            if (ball.getPosition().x <= 15) {
+                scorePlayer1++; // Player 2 scores
+                goalEffect();
+            }
+            if (ball.getPosition().x >= FIELD_WIDTH - 15) {
+                scorePlayer2++; // Player 1 scores
+                goalEffect();
+            }
+            
+            // Goal collision
+            checkGoalCollision();
+        }
+    }
+    
+    void updateEnemies(float dt) {
+        for (auto& enemy : enemies) {
+            sf::Vector2f toBall = ball.getPosition() - enemy.shape.getPosition();
+            float distance = std::sqrt(toBall.x*toBall.x + toBall.y*toBall.y);
+            
+            if (distance > 0) {
+                toBall /= distance;
+                enemy.velocity = toBall * enemy.speed;
+            }
+            
+            enemy.shape.move(enemy.velocity * dt);
+            keepInBounds(enemy.shape);
+            
+            // Ball collision with enemy
+            if (circleCollision(enemy.shape, ball)) {
+                sf::Vector2f collisionVector = ball.getPosition() - enemy.shape.getPosition();
+                float dist = std::sqrt(collisionVector.x*collisionVector.x + collisionVector.y*collisionVector.y);
+                if (dist > 0) {
+                    collisionVector /= dist;
+                    ballVel = collisionVector * ballSpeed * 0.7f;
+                }
+            }
+        }
+    }
+    
+    void updatePowerUps(float dt) {
+        for (auto& pu : powerUps) {
+            pu.timer -= dt;
+            if (pu.timer <= 0) {
+                pu.active = false;
+                continue;
+            }
+            
+            // Player pickup
+            if (circleCollision(player1, pu.shape)) {
+                applyPowerUp(pu.type, 1);
+                pu.active = false;
+            }
+            if (circleCollision(player2, pu.shape)) {
+                applyPowerUp(pu.type, 2);
+                pu.active = false;
+            }
+        }
+        
+        // Remove inactive powerups
+        powerUps.erase(
+            std::remove_if(powerUps.begin(), powerUps.end(),
+                [](const PowerUp& pu){ return !pu.active; }),
+            powerUps.end()
+        );
+        
+        // Spawn new powerup occasionally
+        if (rand() % 300 == 0) spawnPowerUp();
+    }
+    
+    void checkGoalCollision() {
+        sf::FloatRect ballBounds = ball.getGlobalBounds();
+        sf::FloatRect goal1Bounds = goal1.getGlobalBounds();
+        sf::FloatRect goal2Bounds = goal2.getGlobalBounds();
+        
+        if (goal1Bounds.intersects(ballBounds)) {
+            scorePlayer1++;
+            goalEffect();
+        }
+        if (goal2Bounds.intersects(ballBounds)) {
+            scorePlayer2++;
+            goalEffect();
+        }
+    }
+    
+    void goalEffect() {
+        ballInGoal = true;
+        // goalSound.play();
+        createParticles(ball.getPosition(), 50);
+        
+        // Reset after delay
+        sf::Clock delay;
+        while (delay.getElapsedTime().asSeconds() < 2.0f) {}
+        resetBall();
+        ballInGoal = false;
+    }
+    
+    bool circleCollision(const sf::Shape& c1, const sf::Shape& c2) {
+        sf::FloatRect r1 = c1.getGlobalBounds();
+        sf::FloatRect r2 = c2.getGlobalBounds();
+        return r1.intersects(r2);
+    }
+    
+    void keepInBounds(sf::Shape& shape) {
+        sf::FloatRect bounds = shape.getGlobalBounds();
+        if (bounds.left < 0) shape.setPosition(0, shape.getPosition().y);
+        if (bounds.top < 0) shape.setPosition(shape.getPosition().x, 0);
+        if (bounds.left + bounds.width > FIELD_WIDTH) 
+            shape.setPosition(FIELD_WIDTH - bounds.width, shape.getPosition().y);
+        if (bounds.top + bounds.height > FIELD_HEIGHT) 
+            shape.setPosition(shape.getPosition().x, FIELD_HEIGHT - bounds.height);
+    }
+    
+    void applyPowerUp(int type, int player) {
+        if (player == 1) {
+            switch(type) {
+                case 0: player1Speed *= 1.5f; break; // Speed boost
+                case 1: player1.setRadius(35); break; // Big player
+                case 2: ballSpeed *= 1.3f; break; // Fast ball
+            }
+        } else {
+            switch(type) {
+                case 0: player2Speed *= 1.5f; break;
+                case 1: player2.setRadius(35); break;
+                case 2: ballSpeed *= 1.3f; break;
+            }
+        }
+    }
+    
+    void createParticles(sf::Vector2f pos, int count) {
+        for (int i = 0; i < count; i++) {
+            Particle p;
+            p.shape.setRadius(3 + rand() % 3);
+            p.shape.setFillColor(sf::Color::Yellow);
+            p.shape.setPosition(pos);
+            float angle = (rand() % 360) * 3.14159f / 180;
+            p.velocity = {cos(angle) * 200, sin(angle) * 200};
+            p.lifetime = 1.0f;
+            particles.push_back(p);
+        }
+    }
+    
+    void updateParticles(float dt) {
+        for (auto it = particles.begin(); it != particles.end(); ) {
+            it->lifetime -= dt;
+            it->shape.move(it->velocity * dt);
+            it->velocity *= 0.95f;
+            
+            float alpha = it->lifetime * 255;
+            it->shape.setFillColor(sf::Color(255, 255, 0, alpha));
+            
+            if (it->lifetime <= 0) {
+                it = particles.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    
+    void updateUI() {
+        std::ostringstream ss;
+        ss << "P1: " << scorePlayer1 << " - " << scorePlayer2 << " :P2";
+        scoreText.setString(ss.str());
+        scoreText.setPosition(50, 20);
+        
+        int minutes = gameTime / 60;
+        int seconds = (int)gameTime % 60;
+        std::ostringstream timeSS;
+        timeSS << "Time: " << minutes << ":" << (seconds < 10 ? "0" : "") << seconds;
+        timeText.setString(timeSS.str());
+        
+        std::ostringstream levelSS;
+        levelSS << "Level: " << level;
+        levelText.setString(levelSS.str());
+    }
+    
+    void checkLevelUp() {
+        if (scorePlayer1 + scorePlayer2 > level * 10) {
+            level++;
+            initEnemies();
+            std::cout << "Level Up! Level " << level << std::endl;
+        }
+    }
+    
+    void restartLevel() {
+        scorePlayer1 = 0;
+        scorePlayer2 = 0;
+        gameTime = 180.0f;
+        level = 1;
+        player1.setRadius(25);
+        player2.setRadius(25);
+        player1Speed = 400.0f;
+        player2Speed = 400.0f;
+        initEnemies();
+    }
+    
+    void renderGame() {
+        window.setView(gameView);
+        
+        // Draw field
+        sf::RectangleShape field(sf::Vector2f(FIELD_WIDTH, FIELD_HEIGHT));
+        field.setFillColor(sf::Color(34, 139, 34));
+        field.setOutlineColor(sf::Color
